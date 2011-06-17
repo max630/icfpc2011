@@ -109,15 +109,16 @@ apply gd side count0 func arg =
                 else gd
       in (gd', count, Just $ Card I)
     expand F_inc [_] = err
-    expand F_dec [castIx -> Just i] =
+    expand F_dec [castIx -> Just i0] =
       let
-        gd' = if pd_alive pd ! i
+        gd' = if pd_alive od ! i1
                 then
                     if v == 1
-                      then GD (gdV // [(side, pd {pd_alive = pd_alive pd // [(i, False)]})])
-                      else GD (gdV // [(side, pd {pd_vit = pd_vit pd // [(i, v - 1)]})])
+                      then GD (gdV // [(side, od {pd_alive = pd_alive od // [(i1, False)]})])
+                      else GD (gdV // [(side, od {pd_vit = pd_vit od // [(i1, v - 1)]})])
                 else gd
-        v = pd_vit pd ! i
+        v = pd_vit od ! i1
+        i1 = 255 - i0
       in (gd', count, Just $ Card I)
     expand F_dec [_] = err
     expand F_help [Value n, castIx -> Just j, castIx -> Just i] = (gd', count, Just $ Card I)
@@ -128,15 +129,16 @@ apply gd side count0 func arg =
         v = pd_vit od ! i
         v' = fromInteger $ min 65535 (toInteger n * 11 `div` 10 + toInteger v)
     expand F_help [_, _, _] = err
-    expand F_attack [Value n, castIx -> Just j, castIx -> Just i] = (gd', count, Just $ Card I)
+    expand F_attack [Value n, castIx -> Just j, castIx -> Just i0] = (gd', count, Just $ Card I)
       where
-        gd' = if pd_alive od ! i && v' > 0
+        gd' = if pd_alive od ! i1 && v' > 0
                 then if v' > 0
-                  then GD (gdV // [(other side, od {pd_vit = pd_vit od // [(i, v')]})])
-                  else GD (gdV // [(other side, od {pd_alive = pd_alive od // [(i, False)]})])
+                  then GD (gdV // [(other side, od {pd_vit = pd_vit od // [(255 - i1, v')]})])
+                  else GD (gdV // [(other side, od {pd_alive = pd_alive od // [(255 - i1, False)]})])
                 else gd
-        v = pd_vit od ! i
+        v = pd_vit od ! i1
         v' = fromInteger $ max 0 (toInteger v - toInteger n * 9 `div` 10)
+        i1 = 255 - i0
     expand F_attack [_, _, _] = err
     expand F_copy [castIx -> Just i] = (gd, count, Just (pd_field od ! i))
     expand F_copy [_] = err
