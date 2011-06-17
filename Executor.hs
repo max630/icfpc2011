@@ -20,21 +20,21 @@ data PD = PD {pd_vit :: U.Array Int Int, pd_field :: Array Int Func } deriving S
 data Card = I | F_zero | F_succ | F_dbl | F_get | F_put | S | K | F_inc | F_dec | F_attack | F_help | F_copy | F_revive | F_zombie
   deriving (Eq, Ord, Ix, Show)
 
-ccode I = "I"
-ccode F_zero = "zero"
-ccode F_succ = "succ"
-ccode F_dbl = "dbl"
-ccode F_get = "get"
-ccode F_put = "put"
-ccode S = "S"
-ccode K = "K"
-ccode F_inc = "inc"
-ccode F_dec = "dec"
-ccode F_attack = "attack"
-ccode F_help = "help"
-ccode F_copy = "copy"
-ccode F_revive = "revive"
-ccode F_zombie = "zombie"
+pprC I = "I"
+pprC F_zero = "zero"
+pprC F_succ = "succ"
+pprC F_dbl = "dbl"
+pprC F_get = "get"
+pprC F_put = "put"
+pprC S = "S"
+pprC K = "K"
+pprC F_inc = "inc"
+pprC F_dec = "dec"
+pprC F_attack = "attack"
+pprC F_help = "help"
+pprC F_copy = "copy"
+pprC F_revive = "revive"
+pprC F_zombie = "zombie"
 
 arity I = 1
 arity F_zero = 0
@@ -60,6 +60,13 @@ data Func =
   | Card Card
   | Partial Card [Func] -- Int means how many left to full call
   deriving Show
+
+pprF (Value n) = show n
+pprF (Card c) = pprC c
+pprF (Partial c fs) = pprC c ++ (concat $ map pprarg $ reverse fs)
+  where
+    pprarg a@(Partial _ _) = " (" ++ pprF a ++ ")"
+    pprarg a = " " ++ pprF a
 
 data Step = Move | Clean deriving (Eq, Ord, Show)
 
@@ -163,3 +170,34 @@ apply step gd side count0 func arg =
     od = gdV ! (other side)
     err = (gd, count, Nothing)
     count = count0 + 1
+
+-- requirements for "stacked" form:
+-- stacked (Card _)
+-- stacked (Partial c (Card _ : fs)) && stacked (Partial c fs)
+-- stacked (Partial _ [f]) && stacked f
+
+stack (Value 0) = Card F_zero
+stack (Value 1) = Partial F_succ [Card F_zero]
+stack (Value _) = error "TODO: higher ints"
+stack e@(Card _) = e
+stack (Partial c [f]) = Partial c [stack f]
+stack (Partial c (f : fs)) =
+  case stack f of
+    Card c' -> case stack (Partial c fs) of
+                Partial c fs' -> Partial c (Card c' : fs')
+                _ -> error "unexpected stacked form"
+    Partial c' [f'] -> stack (Partial S [f', Card c', Partial K [Partial c fs]])
+    Partial c' (f' : fs') -> stack (Partial S [f', Partial c' fs', Partial K [Partial c fs]])
+
+generator f = reverse $ gen (stack f)
+  where
+    gen (Card c) = [Right c]
+    gen (Partial c [f]) = (Left c : gen f)
+    gen (Partial c (Card c' : fs)) = (Right c' : gen (Partial c fs))
+    gen _ = error "unexpected stacked function"
+
+a = Partial F_attack
+s = Partial S
+k = Partial K
+
+killall = (s [Card F_succ, s [k [Card F_zero], k [Card F_get]], a [Card F_zero, Partial F_succ [Card F_zero ]]])
