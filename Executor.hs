@@ -78,7 +78,6 @@ apply gd side count0 func arg =
             then (gd, count, Just $ Partial c (arg : pargs))
             else expand c (arg : pargs)
   where
-    -- FIXME: change x to 255-x where needed
     expand I [x] = (gd, count, Just x)
     expand F_succ [Value 65535] = (gd, count, Just $ Value 65535)
     expand F_succ [Value x] = (gd, count, Just $ Value $ x + 1)
@@ -133,8 +132,8 @@ apply gd side count0 func arg =
       where
         gd' = if pd_alive od ! i1 && v' > 0
                 then if v' > 0
-                  then GD (gdV // [(other side, od {pd_vit = pd_vit od // [(255 - i1, v')]})])
-                  else GD (gdV // [(other side, od {pd_alive = pd_alive od // [(255 - i1, False)]})])
+                  then GD (gdV // [(other side, od {pd_vit = pd_vit od // [(i1, v')]})])
+                  else GD (gdV // [(other side, od {pd_alive = pd_alive od // [(i1, False)]})])
                 else gd
         v = pd_vit od ! i1
         v' = fromInteger $ max 0 (toInteger v - toInteger n * 9 `div` 10)
