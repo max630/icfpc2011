@@ -61,9 +61,11 @@ data Func =
   | Partial Card [Func] -- Int means how many left to full call
   deriving Show
 
+data Step = Move | Clean deriving (Eq, Ord, Show)
+
 -- TODO: optimize it with adding diffs; cannot tolerate seeing how it rips arrays
 -- FIXME: err must throw!
-apply gd side count0 func arg =
+apply step gd side count0 func arg =
   if count0 >= 1000
     then err
     else
@@ -89,43 +91,57 @@ apply gd side count0 func arg =
     expand F_get [_] = err
     expand F_put [_] = (gd, count, Just $ Card I) -- not error!
     expand S [x, g, f] =
-      case apply gd side count f x of
+      case apply step gd side count f x of
         (gd'', count'', Nothing) -> (gd'', count'', Nothing)
         (gd'', count'', Just h) ->
-          case apply gd'' side count'' g x of
+          case apply step gd'' side count'' g x of
             (gd''', count''', Nothing) -> (gd''', count''', Nothing)
-            (gd''', count''', Just y) -> apply gd''' side count''' h y
+            (gd''', count''', Just y) -> apply step gd''' side count''' h y
     expand K [y, x] = (gd, count, Just x)
     expand F_inc [castIx -> Just i] = (gd', count, Just $ Card I)
       where
-        gd' = if v > 0 && v < 65535
-                then GD (gdV // [(side, pd {pd_vit = pd_vit pd // [(i, v + 1)]})])
-                else gd
+        gd' = case step of
+                Move | v > 0 && v < 65535
+                      -> GD (gdV // [(side, pd {pd_vit = pd_vit pd // [(i, v + 1)]})])
+                Clean | v > 0
+                      -> GD (gdV // [(side, pd {pd_vit = pd_vit pd // [(i, v - 1)]})])
+                _ -> gd
         v = pd_vit pd ! i
     expand F_inc [_] = err
     expand F_dec [castIx -> Just i0] = (gd', count, Just $ Card I)
       where 
-        gd' = if v > 0
-                then GD (gdV // [(side, od {pd_vit = pd_vit od // [(i1, v - 1)]})])
-                else gd
+        gd' = case step of
+                Move | v > 0
+                     -> GD (gdV // [(side, od {pd_vit = pd_vit od // [(i1, v - 1)]})])
+                Clean | v > 0 && v < 65535
+                     -> GD (gdV // [(side, od {pd_vit = pd_vit od // [(i1, v + 1)]})])
+                _ -> gd
         v = pd_vit od ! i1
         i1 = 255 - i0
     expand F_dec [_] = err
     expand F_help [Value n, castIx -> Just j, castIx -> Just i] = (gd', count, Just $ Card I)
       where
-        gd' = if v > 0
-                then GD (gdV // [(other side, pd {pd_vit = pd_vit pd // [(i, v')]})])
-                else gd
+        gd' = case step of
+                Move | v > 0
+                    -> GD (gdV // [(other side, pd {pd_vit = pd_vit pd // [(i, v')]})])
+                Clean | v > 0
+                    -> GD (gdV // [(other side, pd {pd_vit = pd_vit pd // [(i, v'')]})])
+                _ -> gd
         v = pd_vit pd ! i
-        v' = fromInteger $ min 65535 (toInteger n * 11 `div` 10 + toInteger v)
+        v' = fromInteger $ min 65535 (toInteger v + toInteger n * 11 `div` 10)
+        v'' = fromInteger $ max 0 (toInteger v - toInteger n * 11 `div` 10)
     expand F_help [_, _, _] = err
     expand F_attack [Value n, castIx -> Just j, castIx -> Just i0] = (gd', count, Just $ Card I)
       where
-        gd' = if v > 0
-                then GD (gdV // [(other side, od {pd_vit = pd_vit od // [(i1, v')]})])
-                else gd
+        gd' = case step of
+                Move | v > 0
+                     -> GD (gdV // [(other side, od {pd_vit = pd_vit od // [(i1, v')]})])
+                Clean | v > 0
+                     -> GD (gdV // [(other side, od {pd_vit = pd_vit od // [(i1, v'')]})])
+                _ -> gd
         v = pd_vit od ! i1
         v' = fromInteger $ max 0 (toInteger v - toInteger n * 9 `div` 10)
+        v'' = fromInteger $ min 65535 (toInteger v + toInteger n * 9 `div` 10)
         i1 = 255 - i0
     expand F_attack [_, _, _] = err
     expand F_copy [castIx -> Just i] = (gd, count, Just (pd_field od ! i))
