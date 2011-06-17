@@ -71,36 +71,35 @@ apply gd side count0 func arg =
         Value _ -> err
         Card c -> case arity c of
           0 -> err
-          1 -> expand count c [arg]
+          1 -> expand c [arg]
           _ -> (gd, count, Just $ Partial c [arg])
         Partial c pargs ->
           if arity c > length pargs + 1
             then (gd, count, Just $ Partial c (arg : pargs))
-            else expand count c (arg : pargs)
+            else expand c (arg : pargs)
   where
-    -- TODO: is count' needed here?
     -- FIXME: change x to 255-x where needed
-    expand count' I [x] = (gd, count', Just x)
-    expand count' F_succ [Value 65535] = (gd, count', Just $ Value 65535)
-    expand count' F_succ [Value x] = (gd, count', Just $ Value $ x + 1)
-    expand count' F_succ [_] = err
-    expand count' F_dbl [Value n] | n < 32768 = (gd, count', Just $ Value $ 2 * n)
-    expand count' F_dbl [Value n] = (gd, count', Just $ Value 65535)
-    expand count' F_dbl [_] = err
-    expand count' F_get [iv] | Just i <- castIx iv
+    expand I [x] = (gd, count, Just x)
+    expand F_succ [Value 65535] = (gd, count, Just $ Value 65535)
+    expand F_succ [Value x] = (gd, count, Just $ Value $ x + 1)
+    expand F_succ [_] = err
+    expand F_dbl [Value n] | n < 32768 = (gd, count, Just $ Value $ 2 * n)
+    expand F_dbl [Value n] = (gd, count, Just $ Value 65535)
+    expand F_dbl [_] = err
+    expand F_get [iv] | Just i <- castIx iv
                                   , pd_alive pd ! i
-                                  = (gd, count', Just $ Value $ pd_vit pd ! i)
-    expand count' F_get [_] = err
-    expand count' F_put [_] = (gd, count', Just $ Card I) -- not error!
-    expand count' S [x, g, f] =
-      case apply gd side count' f x of
+                                  = (gd, count, Just $ Value $ pd_vit pd ! i)
+    expand F_get [_] = err
+    expand F_put [_] = (gd, count, Just $ Card I) -- not error!
+    expand S [x, g, f] =
+      case apply gd side count f x of
         (gd'', count'', Nothing) -> (gd'', count'', Nothing)
         (gd'', count'', Just h) ->
           case apply gd'' side count'' g x of
             (gd''', count''', Nothing) -> (gd''', count''', Nothing)
             (gd''', count''', Just y) -> apply gd''' side count''' h y
-    expand count' K [y, x] = (gd, count', Just x)
-    expand count' F_inc [iv] | Just i <- castIx iv =
+    expand K [y, x] = (gd, count, Just x)
+    expand F_inc [iv] | Just i <- castIx iv =
       let
         gd' = if pd_alive pd ! i
                 then
@@ -108,9 +107,9 @@ apply gd side count0 func arg =
                     v = pd_vit pd ! i
                   in if v == 65535 then gd else GD (gdV // [(side, pd {pd_vit = pd_vit pd // [(i, v + 1)]})])
                 else gd
-      in (gd', count', Just $ Card I)
-    expand count' F_inc [_] = err
-    expand count' F_dec [castIx -> Just i] =
+      in (gd', count, Just $ Card I)
+    expand F_inc [_] = err
+    expand F_dec [castIx -> Just i] =
       let
         gd' = if pd_alive pd ! i
                 then
@@ -119,17 +118,17 @@ apply gd side count0 func arg =
                       else GD (gdV // [(side, pd {pd_vit = pd_vit pd // [(i, v - 1)]})])
                 else gd
         v = pd_vit pd ! i
-      in (gd', count', Just $ Card I)
-    expand count' F_dec [_] = err
-    expand count' F_help [Value n, castIx -> Just j, castIx -> Just i] = (gd', count', Just $ Card I)
+      in (gd', count, Just $ Card I)
+    expand F_dec [_] = err
+    expand F_help [Value n, castIx -> Just j, castIx -> Just i] = (gd', count, Just $ Card I)
       where
         gd' = if pd_alive od ! i
                 then GD (gdV // [(other side, od {pd_vit = pd_vit od // [(i, v')]})])
                 else gd
         v = pd_vit od ! i
         v' = fromInteger $ min 65535 (toInteger n * 11 `div` 10 + toInteger v)
-    expand count' F_help [_, _, _] = err
-    expand count' F_attack [Value n, castIx -> Just j, castIx -> Just i] = (gd', count', Just $ Card I)
+    expand F_help [_, _, _] = err
+    expand F_attack [Value n, castIx -> Just j, castIx -> Just i] = (gd', count, Just $ Card I)
       where
         gd' = if pd_alive od ! i && v' > 0
                 then if v' > 0
@@ -138,21 +137,21 @@ apply gd side count0 func arg =
                 else gd
         v = pd_vit od ! i
         v' = fromInteger $ max 0 (toInteger v - toInteger n * 9 `div` 10)
-    expand count' F_attack [_, _, _] = err
-    expand count' F_copy [castIx -> Just i] = (gd, count', Just (pd_field od ! i))
-    expand count' F_copy [_] = err
-    expand count' F_revive [castIx -> Just i] = (gd', count', Just $ Card I)
+    expand F_attack [_, _, _] = err
+    expand F_copy [castIx -> Just i] = (gd, count, Just (pd_field od ! i))
+    expand F_copy [_] = err
+    expand F_revive [castIx -> Just i] = (gd', count, Just $ Card I)
       where
         gd' = if pd_alive pd ! i
                 then gd
                 else GD (gdV // [(side, pd {pd_alive = pd_alive pd // [(i, True)]
                                             , pd_vit = pd_vit pd // [(i, 1)]})])
-    expand count' F_revive [_] = err
-    expand count' F_zombie [Value x, castIx -> Just i] | not (pd_alive od ! i) = (gd', count', Just $ Card I)
+    expand F_revive [_] = err
+    expand F_zombie [Value x, castIx -> Just i] | not (pd_alive od ! i) = (gd', count, Just $ Card I)
       where
         gd' = GD (gdV // [(other side, od {pd_alive = pd_alive od // [(i, True)]
                                           , pd_vit = pd_vit od // [(i, x)]})])
-    expand count' F_zombie [_] = err
+    expand F_zombie [_] = err
     (GD gdV) = gd
     pd = gdV ! side
     od = gdV ! (other side)
