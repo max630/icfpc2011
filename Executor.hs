@@ -1,10 +1,13 @@
 {-# LANGUAGE PatternGuards, ViewPatterns #-}
-module Executor where
+module Main where
 
 import qualified Data.Array.Unboxed as U
 import Array (Array, Ix)
 import Data.Array.IArray ((!), (//))
 import Word (Word16)
+import System (getArgs)
+import System.IO (hFlush)
+import IO (stdout)
 
 data GD = GD (Array Side PD) deriving Show -- FIXME: they really should be consistent
 
@@ -201,3 +204,45 @@ s = Partial S
 k = Partial K
 
 killall = (s [Card F_succ, s [s [k [Card F_zero], k [Card F_get]], s [k [Partial F_succ [Card F_zero ]], a [Card F_zero]]]])
+
+main' = putStrLn $ concat $ map (\s -> case s of { Right x -> "2\n0\n" ++ pprC x ++ "\n"; Left x -> "1\n" ++ pprC x ++ "\n0\n" }) $ generator killall
+
+pMove slot cmd =
+  case cmd of
+    Left c -> do
+              print 1
+              putStrLn $ pprC c
+              print slot
+    Right c -> do
+              print 2
+              print slot
+              putStrLn $ pprC c
+
+oMove =
+  do
+    mode <- getLine
+    if mode == "1"
+      then do
+        card <- getLine
+        slotS <- getLine
+        return (mode, slotS, card)
+      else do
+        slotS <- getLine
+        card <- getLine
+        return (mode, slotS, card)
+
+interaction f =
+  do
+    [a0] <- getArgs
+    if a0 == "1"
+      then oMove >> loop
+      else loop
+  where
+    loop =
+      do
+        pMove 0 (Left I)
+        hFlush stdout
+        oMove
+        loop
+
+main = interaction undefined
