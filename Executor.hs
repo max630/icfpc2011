@@ -306,6 +306,10 @@ killallA = Lambda "n" (attack [Value 0, Var "n", Value 1]
 killallA2 = Lambda "n1" (Apply (Lambda "n" (attack [Value 0, Var "n", Value 1]
                                   `Seq` Apply (Lazy (get [Value 0])) (Var "n"))) (succ [Var "n1"]))
 
+killallA3 = Lambda "n" (Lazy (call [Card F_help, Value 0, Value 0, get [Value 1]])
+                        `Seq` attack [Value 0, Var "n", get [Value 1]]
+                        `Seq` Apply (Lazy (get [Value 0])) (succ [Var "n"]))
+
 -- data Lang = Lambda String Lang | Var String | Func (Func FSrc) | Lazy Lang
 
 -- TODO: why I cannot put a here? report this issue to ghc
@@ -398,17 +402,26 @@ interaction f =
         threadDelay 100000
         loop (Just newO)
 
-dumpF commands =
+dumpF commands inits =
   do
-    cmds <- readIORef commands
-    case cmds of
-      (cmd : rest) ->
+    is <- readIORef inits
+    case is of
+      (i : is1) ->
         do
-          writeIORef commands rest
-          return (0, cmd)
-      _ -> return (0, Right F_zero)
+          writeIORef inits is1
+          return (1, i)
+      _ ->
+        do
+          cmds <- readIORef commands
+          case cmds of
+            (cmd : rest) ->
+              do
+                writeIORef commands rest
+                return (0, cmd)
+            _ -> return (0, Right F_zero)
 
 main =
   do
-    commands <- newIORef (generator $ stack $ transform killallA2)
-    interaction $ (\ _ -> dumpF commands)
+    commands <- newIORef $ generator $ stack $ transform killallA3
+    init <- newIORef (Right F_zero : Left F_succ : replicate 16 (Left F_dbl))
+    interaction $ (\ _ -> dumpF commands init)
