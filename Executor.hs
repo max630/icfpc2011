@@ -2,6 +2,7 @@
 {-# LANGUAGE PatternGuards, ViewPatterns, GADTs, EmptyDataDecls #-}
 module Main where
 
+import Prelude hiding (succ)
 import qualified Data.Array.Unboxed as U
 import Array (Array, Ix)
 import Data.Array.IArray ((!), (//))
@@ -9,7 +10,10 @@ import Word (Word16)
 import System (getArgs)
 import System.IO (hFlush)
 import IO (stdout)
+import List (intersperse)
 import Control.Concurrent (threadDelay)
+import Data.IORef (newIORef, readIORef, writeIORef)
+import System.IO.Unsafe (unsafePerformIO)
 
 data GD = GD (Array Side PD) deriving Show -- FIXME: they really should be consistent
 
@@ -89,7 +93,8 @@ data FComb
 data Func a where
   Value :: Word16 -> Func a
   Card :: Card -> Func a
-  Partial :: Card -> [Func a] -> Func a
+  -- Partial :: Card -> [Func a] -> Func a
+  Apply :: Func a -> Func a -> Func a
   Lambda :: String -> Func FSrc -> Func FSrc
   Var :: String -> Func FSrc
   Lazy :: String -> Func FSrc -> Func FSrc
@@ -98,20 +103,32 @@ data Func a where
 instance Show (Func a) where
   show = pprF
 
+call [] = error "Empty call!"
+call [f] = f
+call fs = Apply (call $ init fs) (last fs)
+
+getCall (Apply f1 f2) = getCall f1 ++ [f2]
+getCall f = [f]
+
+getSeq :: Func FSrc -> [Func FSrc]
+getSeq (Seq f1 f2) = getSeq f1 ++ getSeq f2
+getSeq f = [f]
+
 pprF :: Func a -> String
 pprF (Value n) = show n
 pprF (Card c) = pprC c
-pprF (Partial c fs) = pprC c ++ (concat $ map pprarg $ reverse fs)
+pprF f@(Apply f1 f2) = concat $ intersperse " " $ map pprarg (getCall f)
   where
-    pprarg a@(Partial _ _) = " (" ++ pprF a ++ ")"
-    pprarg a = " " ++ pprF a
+    pprarg a@(Apply _ _) = "(" ++ pprF a ++ ")"
+    pprarg a = pprF a
 pprF (Lambda s f) = "(\\ " ++ s ++ " -> " ++ pprF f ++ ")"
 pprF (Var s) = s
 pprF (Lazy s f) = "((lazy " ++ s ++ ") " ++ pprF f ++ ")"
-pprF (Seq f1 f2) = "[" ++ pprF f1 ++ ", " ++ pprF f2 ++ "]"
+pprF f@(Seq f1 f2) = "[" ++ concat (intersperse ", " (map pprF (getSeq f))) ++ "]"
 
 data Step = Move | Clean deriving (Eq, Ord, Show)
 
+{-
 -- TODO: optimize it with adding diffs; cannot tolerate seeing how it rips arrays
 -- FIXME: err must throw!
 apply step gd side count0 func arg =
@@ -214,6 +231,8 @@ apply step gd side count0 func arg =
     err = (gd, count, Nothing)
     count = count0 + 1
 
+-}
+
 -- requirements for "stacked" form:
 -- stacked (Card _)
 -- stacked (Partial c (Card _ : fs)) && stacked (Partial c fs)
@@ -221,9 +240,14 @@ apply step gd side count0 func arg =
 
 stack :: Func FComb -> Func FComb
 stack (Value 0) = Card F_zero
-stack (Value 1) = Partial F_succ [Card F_zero]
+stack (Value 1) = Apply (Card F_succ) (Card F_zero)
 stack (Value _) = error "TODO: higher ints"
 stack e@(Card _) = e
+stack (Apply (Card c) f) = Apply (Card c) (stack f)
+stack (Apply f (Card c)) = Apply (stack f) (Card c)
+stack (Apply f1 f2@(Value v)) = stack (Apply f1 (stack f2))
+stack (Apply f1 (Apply f2 f3)) = stack (call [Card S, Apply (Card K) f1, f2, f3])
+{-
 stack (Partial c []) = error "partial with zero args!"
 stack (Partial c [f]) = Partial c [stack f]
 stack (Partial c (f : fs)) =
@@ -234,47 +258,56 @@ stack (Partial c (f : fs)) =
     Partial c' [f'] -> stack (Partial S [f', Card c', Partial K [Partial c fs]])
     Partial c' (f' : fs') -> stack (Partial S [f', Partial c' fs', Partial K [Partial c fs]])
     f -> error ("Bad stacked: " ++ pprF f)
+-}
 
 generator f = reverse $ gen (stack f)
   where
     gen (Card c) = [Right c]
-    gen (Partial c [f]) = (Left c : gen f)
-    gen (Partial c (Card c' : fs)) = (Right c' : gen (Partial c fs))
-    gen _ = error "unexpected stacked function"
+    gen (Apply f (Card c)) = (Right c : gen f)
+    gen (Apply (Card c) f) = (Left c : gen f)
+    gen f = error ("unexpected stacked function: " ++ pprF f)
 
-attack fs = Partial F_attack $ reverse fs
-s fs = Partial S $ reverse fs
-k fs = Partial K $ reverse fs
-succ fs = Partial F_succ $ reverse fs
-succV = Card F_zero
+attack fs = call (Card F_attack : fs)
+s fs = call (Card S : fs)
+k fs = call (Card K : fs)
+succ fs = call (Card F_succ : fs)
+succV = Card F_succ
 zero = Card F_zero
 getV = Card F_get
-get fs = Partial F_get $ reverse fs
+get fs = call (Card F_get : fs)
 
 -- FIXME: this looks to be broken; implement a languade with lambdas and fix
-killall0 = (s [Card F_succ, s [s [k [Card F_zero], k [Card F_get]], s [k [Partial F_succ [Card F_zero ]], attack [Card F_zero]]]])
+killall0 = (s [Card F_succ, s [s [k [Card F_zero], k [Card F_get]], s [k [Apply (Card F_succ) (Card F_zero)], attack [Card F_zero]]]])
 killallM = s [s[s[attack [(Value 0)], k[Value 1]],s[k[getV], k[zero]]], succV]
+killallA = Lambda "n" (attack [Value 0, Var "n", Value 1]
+                      `Seq` Apply (Lazy "n" (get [Value 0])) (succ [Var "n"]))
+killallA2 = Lambda "n1" (Apply (Lambda "n" (attack [Value 0, Var "n", Value 1]
+                                  `Seq` Apply (Lazy "n" (get [Value 0])) (Var "n"))) (succ [Var "n1"]))
 
 -- data Lang = Lambda String Lang | Var String | Func (Func FSrc) | Lazy String Lang
 
 -- TODO: why I cannot put a here? report this issue to ghc
 closure :: Func FSrc -> Maybe (Func FSrc, Func FSrc)
-closure (Partial c [f]) = Just (Card c, f)
-closure (Partial c (f : fs@(_ : _))) = Just (Partial c fs, f)
+closure (Apply f1 f2) = Just (f1, f2)
 closure _ = Nothing
 
 transform :: Func a -> Func FComb
 transform (Value v) = Value v
 transform (Card c) = Card c
-transform (Partial c fs) = Partial c (map transform fs)
+transform (Apply f1 f2) = Apply (transform f1) (transform f2)
 transform (Lazy v _) = error ("Unbounded variable: " ++ v)
 transform (Var v) = error ("Unbounded variable:" ++ v)
 transform f@(Seq _ _) = error ("sequence outside of lambda:" ++ pprF f)
 transform (Lambda v f) | not (contains v f) = k [transform f]
 transform (Lambda v (closure -> Just (head, Var v1))) | v == v1 && not (contains v head) = transform head
-transform (Lambda v (closure -> Just (head, f))) = s [transform (Lambda v head), transform (Lambda v f)]
-transform (Lambda v (Lazy v1 (closure -> Just (head, f)))) | v == v1
-                                                = s [transform (Lambda v head), transform (Lambda v f)]
+transform f0@(Lambda v (closure -> Just (head, f))) =
+  seq
+    (unsafePerformIO (putStrLn $ "l:" ++ show f0))
+    (s [transform (Lambda v head), transform (Lambda v f)])
+transform f0@(Lambda v (Lazy v1 (closure -> Just (head, f)))) | v == v1 =
+  seq
+    (unsafePerformIO (putStrLn $ "l2:" ++ show f0))
+    (s [transform (Lambda v head), transform (Lambda v f)])
 transform (Lambda v (Seq f1 f2)) =
   transform $
     s [ Lambda v (s [k [f2], k [Var v]])
@@ -288,7 +321,7 @@ contains v f = case f of
     Card _ -> False
     Value _ -> False
     Var v1 -> v == v1
-    Partial c fs -> or (map (contains v) fs)
+    Apply f1 f2 -> contains v f1 || contains v f2
     Lambda v1 _ | v1 == v -> error ("shadowed variable: " ++ v)
     Lambda v1 f -> contains v f
     Lazy v1 f -> v == v1 || contains v f
@@ -334,7 +367,20 @@ interaction f =
         pMove slot cmd
         hFlush stdout
         newO <- oMove
-        threadDelay 1000000
+        threadDelay 100000
         loop (Just newO)
 
-main = interaction (\ _ -> return (0, Left I) )
+dumpF commands =
+  do
+    cmds <- readIORef commands
+    case cmds of
+      (cmd : rest) ->
+        do
+          writeIORef commands rest
+          return (0, cmd)
+      _ -> return (0, Right F_zero)
+
+main =
+  do
+    commands <- newIORef (generator $ stack killallM)
+    interaction $ (\ _ -> dumpF commands)
