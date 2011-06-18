@@ -78,6 +78,28 @@ arity F_copy = 1
 arity F_revive = 1
 arity F_zombie = 2
 
+returnsIC F_put = True
+returnsIC F_inc = True
+returnsIC F_dec = True
+returnsIC F_attack = True
+returnsIC F_help = True
+returnsIC F_copy = True
+returnsIC F_revive = True
+returnsIC F_zombie = True
+returnsIC _ = False
+
+-- nice optimization
+returnsI :: Func a -> Bool
+returnsI (Lazy f) = returnsI f
+returnsI (Value _) = False
+returnsI (Var _) = False -- this can be true but please dont make me implement full-size typecheck
+returnsI (Apply (Lambda _ f) _) = returnsI f
+returnsI (getCall -> (Card c : fs)) = returnsIC c && arity c == length fs
+returnsI (Apply _ _) = False -- this also can be true
+returnsI (Seq _ f) = returnsI f
+returnsI (Card _) = False
+returnsI (Lambda _ _) = False
+
 castIx (Value n) | n >= 0 && n <= 255 = Just $ fromInteger (toInteger n)
 castIx _ = Nothing
 
@@ -302,13 +324,18 @@ transform (Lambda v f) | not (contains v f) = k [transform f]
 transform (Lambda v (Apply (Lazy (Apply f1 f2)) (Var v1))) | v == v1 = s [k [transform f1], k [transform f2]]
 transform (Lambda v (closure -> Just (head, Var v1))) | v == v1 && not (contains v head) = transform head
 transform f0@(Lambda v (closure -> Just (head, f))) =
-  seq
-    (unsafePerformIO (putStrLn $ "l:" ++ show f0))
+  --seq
+  --  (unsafePerformIO (putStrLn $ "l:" ++ show f0))
     (s [transform (Lambda v head), transform (Lambda v f)])
 transform f0@(Lambda v (Lazy (closure -> Just (head, f)))) =
-  seq
-    (unsafePerformIO (putStrLn $ "l2:" ++ show f0))
+  --seq
+  --  (unsafePerformIO (putStrLn $ "l2:" ++ show f0))
     (s [transform (Lambda v head), transform (Lambda v f)])
+transform (Lambda v (Seq f1 f2)) | returnsI f1 =
+  transform $
+    s [ Lambda v f1
+        , Lambda v f2
+      ]
 transform (Lambda v (Seq f1 f2)) =
   transform $
     s [ Lambda v (s [k [f2], k [Var v]])
@@ -383,5 +410,5 @@ dumpF commands =
 
 main =
   do
-    commands <- newIORef (generator $ stack killallM)
+    commands <- newIORef (generator $ stack $ transform killallA2)
     interaction $ (\ _ -> dumpF commands)
