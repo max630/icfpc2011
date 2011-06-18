@@ -8,6 +8,7 @@ import Word (Word16)
 import System (getArgs)
 import System.IO (hFlush)
 import IO (stdout)
+import Control.Concurrent (threadDelay)
 
 data GD = GD (Array Side PD) deriving Show -- FIXME: they really should be consistent
 
@@ -38,6 +39,22 @@ pprC F_help = "help"
 pprC F_copy = "copy"
 pprC F_revive = "revive"
 pprC F_zombie = "zombie"
+
+readC "I" = I
+readC "zero" = F_zero
+readC "succ" = F_succ
+readC "dbl" = F_dbl
+readC "get" = F_get
+readC "put" = F_put
+readC "S" = S
+readC "K" = K
+readC "inc" = F_inc
+readC "dec" = F_dec
+readC "attack" = F_attack
+readC "help" = F_help
+readC "copy" = F_copy
+readC "revive" = F_revive
+readC "zombie" = F_zombie
 
 arity I = 1
 arity F_zero = 0
@@ -218,6 +235,7 @@ pMove slot cmd =
               print slot
               putStrLn $ pprC c
 
+-- TODO: correct output types
 oMove =
   do
     mode <- getLine
@@ -225,24 +243,26 @@ oMove =
       then do
         card <- getLine
         slotS <- getLine
-        return (mode, slotS, card)
+        return (read slotS, Left $ readC card)
       else do
         slotS <- getLine
         card <- getLine
-        return (mode, slotS, card)
+        return (read slotS :: Int, Right $ readC card)
 
 interaction f =
   do
     [a0] <- getArgs
     if a0 == "1"
-      then oMove >> loop
-      else loop
+      then oMove >>= \ d -> loop (Just d)
+      else loop Nothing
   where
-    loop =
+    loop o =
       do
-        pMove 0 (Left I)
+        (slot, cmd) <- f o
+        pMove slot cmd
         hFlush stdout
-        oMove
-        loop
+        newO <- oMove
+        threadDelay 1000000
+        loop (Just newO)
 
-main = interaction undefined
+main = interaction (\ _ -> return (0, Left I) )
