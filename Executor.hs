@@ -200,4 +200,4 @@ a = Partial F_attack
 s = Partial S
 k = Partial K
 
-killall = (s [Card F_succ, s [k [Card F_zero], k [Card F_get]], a [Card F_zero, Partial F_succ [Card F_zero ]]])
+killall = (s [Card F_succ, s [s [k [Card F_zero], k [Card F_get]], s [k [Partial F_succ [Card F_zero ]], a [Card F_zero]]]])
