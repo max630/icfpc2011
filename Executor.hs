@@ -1,4 +1,5 @@
-{-# LANGUAGE PatternGuards, ViewPatterns #-}
+{-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
+{-# LANGUAGE PatternGuards, ViewPatterns, GADTs, EmptyDataDecls #-}
 module Main where
 
 import qualified Data.Array.Unboxed as U
@@ -19,7 +20,7 @@ data Side = ME | OP deriving (Eq, Ord, Ix, Show)
 other ME = OP
 other OP = ME
 
-data PD = PD {pd_vit :: U.Array Int Int, pd_field :: Array Int Func } deriving Show
+data PD = PD {pd_vit :: U.Array Int Int, pd_field :: Array Int (Func FComb) } deriving Show
 
 data Card = I | F_zero | F_succ | F_dbl | F_get | F_put | S | K | F_inc | F_dec | F_attack | F_help | F_copy | F_revive | F_zombie
   deriving (Eq, Ord, Ix, Show)
@@ -55,6 +56,7 @@ readC "help" = F_help
 readC "copy" = F_copy
 readC "revive" = F_revive
 readC "zombie" = F_zombie
+readC s = error ("Bad card: " ++ s)
 
 arity I = 1
 arity F_zero = 0
@@ -75,18 +77,36 @@ arity F_zombie = 2
 castIx (Value n) | n >= 0 && n <= 255 = Just $ fromInteger (toInteger n)
 castIx _ = Nothing
 
-data Func =
+{- data Func =
   Value Word16
   | Card Card
   | Partial Card [Func] -- Int means how many left to full call
-  deriving Show
+  deriving Show -}
 
+data FSrc
+data FComb
+
+data Func a where
+  Value :: Word16 -> Func a
+  Card :: Card -> Func a
+  Partial :: Card -> [Func a] -> Func a
+  Lambda :: String -> Func FSrc -> Func FSrc
+  Var :: String -> Func FSrc
+  Lazy :: String -> Func FSrc -> Func FSrc
+
+instance Show (Func a) where
+  show = pprF
+
+pprF :: Func a -> String
 pprF (Value n) = show n
 pprF (Card c) = pprC c
 pprF (Partial c fs) = pprC c ++ (concat $ map pprarg $ reverse fs)
   where
     pprarg a@(Partial _ _) = " (" ++ pprF a ++ ")"
     pprarg a = " " ++ pprF a
+pprF (Lambda s f) = "(\\ " ++ s ++ " -> " ++ pprF f ++ ")"
+pprF (Var s) = s
+pprF (Lazy s f) = "((lazy " ++ s ++ ") " ++ pprF f ++ ")"
 
 data Step = Move | Clean deriving (Eq, Ord, Show)
 
@@ -185,6 +205,7 @@ apply step gd side count0 func arg =
                                           , pd_field = pd_field od // [(i1, x)]})])
         i1 = 255 - i0
     expand F_zombie [_] = err
+    expand c args = error ("Bad expand:" ++ pprC c ++ " " ++ show args)
     (GD gdV) = gd
     pd = gdV ! side
     od = gdV ! (other side)
@@ -196,10 +217,12 @@ apply step gd side count0 func arg =
 -- stacked (Partial c (Card _ : fs)) && stacked (Partial c fs)
 -- stacked (Partial _ [f]) && stacked f
 
+stack :: Func FComb -> Func FComb
 stack (Value 0) = Card F_zero
 stack (Value 1) = Partial F_succ [Card F_zero]
 stack (Value _) = error "TODO: higher ints"
 stack e@(Card _) = e
+stack (Partial c []) = error "partial with zero args!"
 stack (Partial c [f]) = Partial c [stack f]
 stack (Partial c (f : fs)) =
   case stack f of
@@ -208,6 +231,7 @@ stack (Partial c (f : fs)) =
                 _ -> error "unexpected stacked form"
     Partial c' [f'] -> stack (Partial S [f', Card c', Partial K [Partial c fs]])
     Partial c' (f' : fs') -> stack (Partial S [f', Partial c' fs', Partial K [Partial c fs]])
+    f -> error ("Bad stacked: " ++ pprF f)
 
 generator f = reverse $ gen (stack f)
   where
@@ -216,11 +240,20 @@ generator f = reverse $ gen (stack f)
     gen (Partial c (Card c' : fs)) = (Right c' : gen (Partial c fs))
     gen _ = error "unexpected stacked function"
 
-a = Partial F_attack
-s = Partial S
-k = Partial K
+attack fs = Partial F_attack $ reverse fs
+s fs = Partial S $ reverse fs
+k fs = Partial K $ reverse fs
+succ fs = Partial F_succ $ reverse fs
+succV = Card F_zero
+zero = Card F_zero
+getV = Card F_get
 
-killall = (s [Card F_succ, s [s [k [Card F_zero], k [Card F_get]], s [k [Partial F_succ [Card F_zero ]], a [Card F_zero]]]])
+-- FIXME: this looks to be broken; implement a languade with lambdas and fix
+killall0 = (s [Card F_succ, s [s [k [Card F_zero], k [Card F_get]], s [k [Partial F_succ [Card F_zero ]], attack [Card F_zero]]]])
+killall = s [s[s[attack [(Value 0)], k[Value 1]],s[k[getV], k[zero]]], succV]
+
+-- data Lang = Lambda String Lang | Var String | Func (Func FSrc) | Lazy String Lang
+
 
 main' = putStrLn $ concat $ map (\s -> case s of { Right x -> "2\n0\n" ++ pprC x ++ "\n"; Left x -> "1\n" ++ pprC x ++ "\n0\n" }) $ generator killall
 
