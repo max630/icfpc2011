@@ -93,6 +93,7 @@ data Func a where
   Lambda :: String -> Func FSrc -> Func FSrc
   Var :: String -> Func FSrc
   Lazy :: String -> Func FSrc -> Func FSrc
+  Seq :: Func FSrc -> Func FSrc -> Func FSrc
 
 instance Show (Func a) where
   show = pprF
@@ -107,6 +108,7 @@ pprF (Partial c fs) = pprC c ++ (concat $ map pprarg $ reverse fs)
 pprF (Lambda s f) = "(\\ " ++ s ++ " -> " ++ pprF f ++ ")"
 pprF (Var s) = s
 pprF (Lazy s f) = "((lazy " ++ s ++ ") " ++ pprF f ++ ")"
+pprF (Seq f1 f2) = "[" ++ pprF f1 ++ ", " ++ pprF f2 ++ "]"
 
 data Step = Move | Clean deriving (Eq, Ord, Show)
 
@@ -247,10 +249,11 @@ succ fs = Partial F_succ $ reverse fs
 succV = Card F_zero
 zero = Card F_zero
 getV = Card F_get
+get fs = Partial F_get $ reverse fs
 
 -- FIXME: this looks to be broken; implement a languade with lambdas and fix
 killall0 = (s [Card F_succ, s [s [k [Card F_zero], k [Card F_get]], s [k [Partial F_succ [Card F_zero ]], attack [Card F_zero]]]])
-killall = s [s[s[attack [(Value 0)], k[Value 1]],s[k[getV], k[zero]]], succV]
+killallM = s [s[s[attack [(Value 0)], k[Value 1]],s[k[getV], k[zero]]], succV]
 
 -- data Lang = Lambda String Lang | Var String | Func (Func FSrc) | Lazy String Lang
 
@@ -266,11 +269,17 @@ transform (Card c) = Card c
 transform (Partial c fs) = Partial c (map transform fs)
 transform (Lazy v _) = error ("Unbounded variable: " ++ v)
 transform (Var v) = error ("Unbounded variable:" ++ v)
+transform f@(Seq _ _) = error ("sequence outside of lambda:" ++ pprF f)
 transform (Lambda v f) | not (contains v f) = k [transform f]
 transform (Lambda v (closure -> Just (head, Var v1))) | v == v1 && not (contains v head) = transform head
 transform (Lambda v (closure -> Just (head, f))) = s [transform (Lambda v head), transform (Lambda v f)]
 transform (Lambda v (Lazy v1 (closure -> Just (head, f)))) | v == v1
                                                 = s [transform (Lambda v head), transform (Lambda v f)]
+transform (Lambda v (Seq f1 f2)) =
+  transform $
+    s [ Lambda v (s [k [f2], k [Var v]])
+        , Lambda v f1
+      ]
 transform (Lambda v f) = error ("Cannot transform: " ++ pprF f ++ ", var " ++ v)
 -- transform (Lambda v (Var v1)) | v == v1 = Card I
 
@@ -283,8 +292,9 @@ contains v f = case f of
     Lambda v1 _ | v1 == v -> error ("shadowed variable: " ++ v)
     Lambda v1 f -> contains v f
     Lazy v1 f -> v == v1 || contains v f
+    Seq f1 f2 -> contains v f1 || contains v f2
 
-main' = putStrLn $ concat $ map (\s -> case s of { Right x -> "2\n0\n" ++ pprC x ++ "\n"; Left x -> "1\n" ++ pprC x ++ "\n0\n" }) $ generator killall
+-- main' = putStrLn $ concat $ map (\s -> case s of { Right x -> "2\n0\n" ++ pprC x ++ "\n"; Left x -> "1\n" ++ pprC x ++ "\n0\n" }) $ generator killall
 
 pMove slot cmd =
   case cmd of
