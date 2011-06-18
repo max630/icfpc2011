@@ -352,7 +352,7 @@ contains v f = case f of
     Apply f1 f2 -> contains v f1 || contains v f2
     Lambda v1 _ | v1 == v -> error ("shadowed variable: " ++ v)
     Lambda v1 f -> contains v f
-    Lazy f -> contains v f
+    Lazy f -> True
     Seq f1 f2 -> contains v f1 || contains v f2
 
 -- main' = putStrLn $ concat $ map (\s -> case s of { Right x -> "2\n0\n" ++ pprC x ++ "\n"; Left x -> "1\n" ++ pprC x ++ "\n0\n" }) $ generator killall
