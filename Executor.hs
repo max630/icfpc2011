@@ -151,9 +151,10 @@ pprF f@(Seq f1 f2) = "[" ++ concat (intersperse ", " (map pprF (getSeq f))) ++ "
 
 data Step = Move | Clean deriving (Eq, Ord, Show)
 
-{-
+
+
 -- TODO: optimize it with adding diffs; cannot tolerate seeing how it rips arrays
--- FIXME: err must throw!
+-- FIX: the help and attack special behavior
 apply step gd side count0 func arg =
   if count0 >= 1000
     then err
@@ -163,11 +164,9 @@ apply step gd side count0 func arg =
         Card c -> case arity c of
           0 -> err
           1 -> expand c [arg]
-          _ -> (gd, count, Just $ Partial c [arg])
-        Partial c pargs ->
-          if arity c > length pargs + 1
-            then (gd, count, Just $ Partial c (arg : pargs))
-            else expand c (arg : pargs)
+          _ -> (gd, count, Just $ Apply (Card c) arg)
+        Apply f1 f2 | (Card c : fs) <- getCall func, length fs + 1 == arity c -> expand c (fs ++ [arg])
+        Apply f1 f2 -> (gd, count, Just $ Apply func arg)
   where
     expand I [x] = (gd, count, Just x)
     expand F_succ [Value 65535] = (gd, count, Just $ Value 65535)
@@ -179,14 +178,14 @@ apply step gd side count0 func arg =
     expand F_get [castIx -> Just i] | pd_vit pd ! i > 0 = (gd, count, Just $ Value $ fromInteger $ toInteger (pd_vit pd ! i))
     expand F_get [_] = err
     expand F_put [_] = (gd, count, Just $ Card I) -- not error!
-    expand S [x, g, f] =
+    expand S [f, g, x] =
       case apply step gd side count f x of
         (gd'', count'', Nothing) -> (gd'', count'', Nothing)
         (gd'', count'', Just h) ->
           case apply step gd'' side count'' g x of
             (gd''', count''', Nothing) -> (gd''', count''', Nothing)
             (gd''', count''', Just y) -> apply step gd''' side count''' h y
-    expand K [y, x] = (gd, count, Just x)
+    expand K [x, y] = (gd, count, Just x)
     expand F_inc [castIx -> Just i] = (gd', count, Just $ Card I)
       where
         gd' = case step of
@@ -208,19 +207,33 @@ apply step gd side count0 func arg =
         v = pd_vit od ! i1
         i1 = 255 - i0
     expand F_dec [_] = err
-    expand F_help [Value n, castIx -> Just j, castIx -> Just i] = (gd', count, Just $ Card I)
+    expand F_help [castIx -> Just i, castIx -> Just j, Value nW]
+              | nW > 0, vi >= n
+        = (gd', count, Just $ Card I)
       where
-        gd' = case step of
-                Move | v > 0
-                    -> GD (gdV // [(other side, pd {pd_vit = pd_vit pd // [(i, v')]})])
-                Clean | v > 0
-                    -> GD (gdV // [(other side, pd {pd_vit = pd_vit pd // [(i, v'')]})])
-                _ -> gd
-        v = pd_vit pd ! i
+        gd' = if i /= j
+                then
+                  case step of
+                    Move | v > 0
+                        -> GD (gdV // [(other side, pd {pd_vit = pd_vit pd // [(j, v'), (i, vi')]})])
+                    Clean | v > 0
+                        -> GD (gdV // [(other side, pd {pd_vit = pd_vit pd // [(j, v''), (i, vi')]})])
+                    _ -> gd
+                else
+                  case step of
+                    Move -> GD (gdV // [(other side, pd {pd_vit = pd_vit pd // [(i, vi'')]})])
+                    Clean -> GD (gdV // [(other side, pd {pd_vit = pd_vit pd // [(i, vi''')]})])
+        n = fromInteger $ toInteger nW
+        v = pd_vit pd ! j
+        vi = pd_vit pd ! i
         v' = fromInteger $ min 65535 (toInteger v + toInteger n * 11 `div` 10)
         v'' = fromInteger $ max 0 (toInteger v - toInteger n * 11 `div` 10)
+        vi' = fromInteger $ max 0 (toInteger vi - toInteger n)
+        vi'' = fromInteger $ min 65535 (toInteger v + toInteger n `div` 10)
+        vi''' = fromInteger $ min 65535 (toInteger v - toInteger n * 21 `div` 10)
+    expand F_help [castIx -> Just i, castIx -> Just j, Value 0] | pd_vit pd ! i > 0 = (gd, count, Just $ Card I)
     expand F_help [_, _, _] = err
-    expand F_attack [Value n, castIx -> Just j, castIx -> Just i0] = (gd', count, Just $ Card I)
+    expand F_attack [castIx -> Just i0, castIx -> Just j, Value n] = (gd', count, Just $ Card I)
       where
         gd' = case step of
                 Move | v > 0
@@ -241,7 +254,7 @@ apply step gd side count0 func arg =
                 then gd
                 else GD (gdV // [(side, pd {pd_vit = pd_vit pd // [(i, 1)]})])
     expand F_revive [_] = err
-    expand F_zombie [x, castIx -> Just i0] | pd_vit od ! i1 <= 0 = (gd', count, Just $ Card I)
+    expand F_zombie [castIx -> Just i0, x] | pd_vit od ! i1 <= 0 = (gd', count, Just $ Card I)
       where
         gd' = GD (gdV // [(other side, od {pd_vit = pd_vit od // [(i1, -1)]
                                           , pd_field = pd_field od // [(i1, x)]})])
@@ -254,7 +267,6 @@ apply step gd side count0 func arg =
     err = (gd, count, Nothing)
     count = count0 + 1
 
--}
 
 -- requirements for "stacked" form:
 -- stacked (Card _)
