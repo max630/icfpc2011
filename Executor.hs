@@ -91,7 +91,7 @@ returnsIC _ = False
 
 -- nice optimization
 returnsI :: Func a -> Bool
-returnsI (Lazy f) = returnsI f
+returnsI (Lazy _ f) = returnsI f
 returnsI (Value _) = False
 returnsI (Var _) = False -- this can be true but please dont make me implement full-size typecheck
 returnsI (Apply (Lambda _ f) _) = returnsI f
@@ -120,7 +120,7 @@ data Func a where
   Apply :: Func a -> Func a -> Func a
   Lambda :: String -> Func FSrc -> Func FSrc
   Var :: String -> Func FSrc
-  Lazy :: Func FSrc -> Func FSrc
+  Lazy :: String -> Func FSrc -> Func FSrc
   Seq :: Func FSrc -> Func FSrc -> Func FSrc
 
 instance Show (Func a) where
@@ -146,7 +146,7 @@ pprF f@(Apply f1 f2) = concat $ intersperse " " $ map pprarg (getCall f)
     pprarg a = pprF a
 pprF (Lambda s f) = "(\\ " ++ s ++ " -> " ++ pprF f ++ ")"
 pprF (Var s) = s
-pprF (Lazy f) = "(lazy " ++ pprF f ++ ")"
+pprF (Lazy s f) = "((lazy " ++ s ++ ") " ++ pprF f ++ ")"
 pprF f@(Seq f1 f2) = "[" ++ concat (intersperse ", " (map pprF (getSeq f))) ++ "]"
 
 data Step = Move | Clean deriving (Eq, Ord, Show)
@@ -316,13 +316,13 @@ get fs = call (Card F_get : fs)
 killall0 = (s [Card F_succ, s [s [k [Card F_zero], k [Card F_get]], s [k [Apply (Card F_succ) (Card F_zero)], attack [Card F_zero]]]])
 killallM = s [s[s[attack [(Value 0)], k[Value 1]],s[k[getV], k[zero]]], succV]
 killallA = Lambda "n" (attack [Value 0, Var "n", Value 1]
-                      `Seq` Apply (Lazy (get [Value 0])) (succ [Var "n"]))
+                      `Seq` Apply (Lazy "n" (get [Value 0])) (succ [Var "n"]))
 killallA2 = Lambda "n1" (Apply (Lambda "n" (attack [Value 0, Var "n", Value 1]
-                                  `Seq` Apply (Lazy (get [Value 0])) (Var "n"))) (succ [Var "n1"]))
+                                  `Seq` Apply (Lazy "n" (get [Value 0])) (Var "n"))) (succ [Var "n1"]))
 
 killallA3 pos = Lambda "n" (call [Card F_help, Var "n", Value 0, Value 9984]
                         `Seq` attack [Value 0, Var "n", Value 11264]
-                        `Seq` Apply (Lazy (get [Value pos])) (succ [Var "n"]))
+                        `Seq` Apply (Lazy "n" (get [Value pos])) (succ [Var "n"]))
 
 kill base = Lambda "n" (call [Card F_help, Var "n", Value base, Value 9984]
                         `Seq` attack [Value base, Var "n", Value 10240])
@@ -338,17 +338,17 @@ transform :: Func a -> Func FComb
 transform (Value v) = Value v
 transform (Card c) = Card c
 transform (Apply f1 f2) = Apply (transform f1) (transform f2)
-transform f@(Lazy _) = error ("lazy outside of lambda: " ++ pprF f)
+transform f@(Lazy _ _) = error ("lazy outside of lambda: " ++ pprF f)
 transform (Var v) = error ("Unbounded variable:" ++ v)
 transform f@(Seq _ _) = error ("sequence outside of lambda:" ++ pprF f)
 transform (Lambda v f) | not (contains v f) = k [transform f]
-transform (Lambda v (Apply (Lazy (Apply f1 f2)) (Var v1))) | v == v1 = s [k [transform f1], k [transform f2]]
+transform (Lambda v (Apply (Lazy v1 (Apply f1 f2)) (Var v2))) | v == v1 && v1 == v2 = s [k [transform f1], k [transform f2]]
 transform (Lambda v (closure -> Just (head, Var v1))) | v == v1 && not (contains v head) = transform head
 transform f0@(Lambda v (closure -> Just (head, f))) =
   --seq
   --  (unsafePerformIO (putStrLn $ "l:" ++ show f0))
     (s [transform (Lambda v head), transform (Lambda v f)])
-transform f0@(Lambda v (Lazy (closure -> Just (head, f)))) =
+transform f0@(Lambda v (Lazy v1 (closure -> Just (head, f)))) | v == v1 =
   --seq
   --  (unsafePerformIO (putStrLn $ "l2:" ++ show f0))
     (s [transform (Lambda v head), transform (Lambda v f)])
@@ -366,14 +366,14 @@ transform (Lambda v f) = error ("Cannot transform: " ++ pprF f ++ ", var " ++ v)
 -- transform (Lambda v (Var v1)) | v == v1 = Card I
 
 contains :: String -> Func a -> Bool
-contains v f = case f of
+contains v f0 = case f0 of
     Card _ -> False
     Value _ -> False
     Var v1 -> v == v1
     Apply f1 f2 -> contains v f1 || contains v f2
     Lambda v1 _ | v1 == v -> error ("shadowed variable: " ++ v)
     Lambda v1 f -> contains v f
-    Lazy f -> True
+    Lazy v1 f -> v == v1 || contains v f
     Seq f1 f2 -> contains v f1 || contains v f2
 
 -- main' = putStrLn $ concat $ map (\s -> case s of { Right x -> "2\n0\n" ++ pprC x ++ "\n"; Left x -> "1\n" ++ pprC x ++ "\n0\n" }) $ generator killall
