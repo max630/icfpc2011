@@ -416,7 +416,6 @@ interaction f =
         pMove slot cmd
         hFlush stdout
         newO <- oMove
-        threadDelay 100000
         loop (Just newO)
 
 dumpF commands pos =
