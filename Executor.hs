@@ -11,6 +11,7 @@ import System (getArgs)
 import System.IO (hFlush)
 import IO (stdout)
 import List (intersperse)
+import Random (randomRIO)
 import Control.Concurrent (threadDelay)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import System.IO.Unsafe (unsafePerformIO)
@@ -262,8 +263,9 @@ apply step gd side count0 func arg =
 
 stack :: Func FComb -> Func FComb
 stack (Value 0) = Card F_zero
-stack (Value 1) = Apply (Card F_succ) (Card F_zero)
-stack (Value _) = error "TODO: higher ints"
+stack (Value n) = if n `mod` 2 == 0
+                    then Apply (Card F_dbl) (stack (Value (n `div` 2)))
+                    else Apply (Card F_succ) (stack (Value (n - 1)))
 stack e@(Card _) = e
 stack (Apply (Card c) f) = Apply (Card c) (stack f)
 stack (Apply f (Card c)) = Apply (stack f) (Card c)
@@ -306,9 +308,12 @@ killallA = Lambda "n" (attack [Value 0, Var "n", Value 1]
 killallA2 = Lambda "n1" (Apply (Lambda "n" (attack [Value 0, Var "n", Value 1]
                                   `Seq` Apply (Lazy (get [Value 0])) (Var "n"))) (succ [Var "n1"]))
 
-killallA3 = Lambda "n" (Lazy (call [Card F_help, Value 0, Value 0, get [Value 1]])
-                        `Seq` attack [Value 0, Var "n", get [Value 1]]
-                        `Seq` Apply (Lazy (get [Value 0])) (succ [Var "n"]))
+killallA3 pos = Lambda "n" (call [Card F_help, Var "n", Value 0, Value 9984]
+                        `Seq` attack [Value 0, Var "n", Value 11264]
+                        `Seq` Apply (Lazy (get [Value pos])) (succ [Var "n"]))
+
+kill base = Lambda "n" (call [Card F_help, Var "n", Value base, Value 9984]
+                        `Seq` attack [Value base, Var "n", Value 10240])
 
 -- data Lang = Lambda String Lang | Var String | Func (Func FSrc) | Lazy Lang
 
@@ -402,26 +407,29 @@ interaction f =
         threadDelay 100000
         loop (Just newO)
 
-dumpF commands inits =
+dumpF commands pos =
   do
-    is <- readIORef inits
-    case is of
-      (i : is1) ->
+    cmds <- readIORef commands
+    case cmds of
+      (cmd : rest) ->
         do
-          writeIORef inits is1
-          return (1, i)
-      _ ->
-        do
-          cmds <- readIORef commands
-          case cmds of
-            (cmd : rest) ->
-              do
-                writeIORef commands rest
-                return (0, cmd)
-            _ -> return (0, Right F_zero)
+          writeIORef commands rest
+          return cmd
+      _ -> return (0, Left I)
+
+callCmds pos = concat (map (callOnce pos) [(pos + 1), (pos + 49) .. 255] ++ map (callOnce pos) [0, 49 .. pos])
+
+callOnce pos arg = zip (repeat arg) (generator (stack (transform (callOnceCmd pos arg))))
+
+callOnceCmd pos arg = call [Card F_get, Value pos, Value arg]
 
 main =
   do
-    commands <- newIORef $ generator $ stack $ transform killallA3
-    init <- newIORef (Right F_zero : Left F_succ : replicate 16 (Left F_dbl))
-    interaction $ (\ _ -> dumpF commands init)
+    posI <- randomRIO (0, 255)
+    let
+      pos = fromInteger posI
+      setup = zip (repeat pos) (generator $ stack $ transform (killallA3 pos))
+      calls = callCmds pos
+    commands <- newIORef (setup ++ calls)
+    interaction $ (\ _ -> dumpF commands pos)
+
