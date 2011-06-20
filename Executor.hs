@@ -110,8 +110,8 @@ castIx _ = Nothing
   | Partial Card [Func] -- Int means how many left to full call
   deriving Show -}
 
-data FSrc
-data FComb
+data FSrc = FSrc
+data FComb = FComb
 
 data Func a where
   Value :: Word16 -> Func a
@@ -122,6 +122,13 @@ data Func a where
   Var :: String -> Func FSrc
   Lazy :: String -> Func FSrc -> Func FSrc
   Seq :: Func FSrc -> Func FSrc -> Func FSrc
+
+castComb :: Func a -> Func FComb
+castComb (Value v) = Value v
+castComb (Card c) = Card c
+castComb (Apply f1 f2) = Apply (castComb f1) (castComb f2)
+castComb f = error ("Not transformed:" ++ pprF f)
+
 
 instance Show (Func a) where
   show = pprF
@@ -324,6 +331,25 @@ killallA3 pos = Lambda "n" (call [Card F_help, Var "n", Value 0, Value 9984]
                         `Seq` attack [Value 0, Var "n", Value 11264]
                         `Seq` Apply (Lazy "n" (get [Value pos])) (succ [Var "n"]))
 
+killallA4 pos = Lambda "n"
+                  (Apply
+                    (Lambda "i"
+                      (call [Card F_help, Var "n", Value 0, Apply (Var "i") (Value 39)]
+                        `Seq` attack [Value 0, Var "n", Apply (Var "i") (Value 44)]
+                        `Seq` Apply (Lazy "n" (get [Value pos])) (succ [Var "n"])))
+                    (Card I) -- this must be * 2^something
+                  )
+
+killallA5 pos = Lambda "n"
+                  (Apply
+                    (Lambda "v"
+                      (call [Card F_help, Var "n", Value 0, Var "v"]
+                        `Seq` (Apply (Lambda "f" (call [Var "f", Var "v", call [Var "f", Value 1280]]))
+                                     (attack [Value 0, Var "n"]))
+                        `Seq` Apply (Lazy "n" (get [Value pos])) (succ [Var "n"])))
+                    (Value 9984)
+                  )
+
 kill base = Lambda "n" (call [Card F_help, Var "n", Value base, Value 9984]
                         `Seq` attack [Value base, Var "n", Value 10240])
 
@@ -334,36 +360,33 @@ closure :: Func FSrc -> Maybe (Func FSrc, Func FSrc)
 closure (Apply f1 f2) = Just (f1, f2)
 closure _ = Nothing
 
-transform :: Func a -> Func FComb
-transform (Value v) = Value v
-transform (Card c) = Card c
-transform (Apply f1 f2) = Apply (transform f1) (transform f2)
-transform f@(Lazy _ _) = error ("lazy outside of lambda: " ++ pprF f)
-transform (Var v) = error ("Unbounded variable:" ++ v)
-transform f@(Seq _ _) = error ("sequence outside of lambda:" ++ pprF f)
-transform (Lambda v f) | not (contains v f) = k [transform f]
-transform (Lambda v (Apply (Lazy v1 (Apply f1 f2)) (Var v2))) | v == v1 && v1 == v2 = s [k [transform f1], k [transform f2]]
-transform (Lambda v (closure -> Just (head, Var v1))) | v == v1 && not (contains v head) = transform head
-transform f0@(Lambda v (closure -> Just (head, f))) =
+transformX :: Func FSrc -> Func FSrc
+transformX (Value v) = Value v
+transformX (Card c) = Card c
+transformX (Apply f1 f2) = Apply (transformX f1) (transformX f2)
+transformX (Lazy v f) = Lazy v f
+transformX (Var v) = Var v
+transformX f@(Seq _ _) = error ("sequence outside of lambda:" ++ pprF f)
+transformX (Lambda v f) | not (contains v f) = k [transformX f]
+transformX (Lambda v (Apply (Lazy v1 (Apply f1 f2)) (Var v2))) | v == v1 && v1 == v2 = s [transformX (Lambda v f1), transformX (Lambda v f2)]
+transformX (Lambda v (closure -> Just (head, Var v1))) | v == v1 && not (contains v head) = transformX head
+transformX f0@(Lambda v (closure -> Just (head, f))) =
   --seq
   --  (unsafePerformIO (putStrLn $ "l:" ++ show f0))
-    (s [transform (Lambda v head), transform (Lambda v f)])
-transform f0@(Lambda v (Lazy v1 (closure -> Just (head, f)))) | v == v1 =
+    (s [transformX (Lambda v head), transformX (Lambda v f)])
+transformX f0@(Lambda v (Lazy v1 (closure -> Just (head, f)))) | v == v1 =
   --seq
   --  (unsafePerformIO (putStrLn $ "l2:" ++ show f0))
-    (s [transform (Lambda v head), transform (Lambda v f)])
-transform (Lambda v (Seq f1 f2)) | returnsI f1 =
-  transform $
-    s [ Lambda v f1
-        , Lambda v f2
-      ]
-transform (Lambda v (Seq f1 f2)) =
-  transform $
-    s [ Lambda v (s [k [f2], k [Var v]])
-        , Lambda v f1
-      ]
-transform (Lambda v f) = error ("Cannot transform: " ++ pprF f ++ ", var " ++ v)
--- transform (Lambda v (Var v1)) | v == v1 = Card I
+    (s [transformX (Lambda v head), transformX (Lambda v f)])
+transformX (Lambda v (Seq f1 f2)) | returnsI f1 =
+  s [ transformX (Lambda v f1), transformX (Lambda v f2) ]
+-- transformX (Lambda v (Seq f1 f2)) =
+--   s [transformX (Lambda v (s [k [f2], k [Var v]])), transformX (Lambda v f1)]
+transformX (Lambda v1 f1@(Lambda v2 _)) | v1 /= v2 = transformX (Lambda v1 (transformX f1))
+transformX (Lambda v (Var v1)) | v == v1 = Card I
+transformX (Lambda v f) = error ("Cannot transformX: " ++ pprF f ++ ", var " ++ v)
+
+transform f = castComb $ transformX f
 
 contains :: String -> Func a -> Bool
 contains v f0 = case f0 of
