@@ -22,6 +22,9 @@ import qualified Data.Text as T
 
 import qualified Data.Map as M
 
+import Control.Monad.Trans (lift)
+import Data.Maybe (maybe)
+
 data Card = I | F_zero | F_succ | F_dbl | F_get | F_put | S | K | F_inc | F_dec | F_attack | F_help | F_copy | F_revive | F_zombie
   deriving (Eq, Ord, Show)
 
@@ -305,9 +308,10 @@ main0 =
     commands <- newIORef (setup ++ calls)
     interaction $ (\_ -> dumpF commands pos)
 
-main1 = run (ET.enumHandle stdin $$ (EL.map T.unpack =$ parseCommands =$ EL.mapAccum think init =$ EL.mapM (\resp -> printResponse stdout resp >> return resp) =$ EL.takeWhile checkTerminate))
+main1 = run (ET.enumHandle stdin $$ (EL.map T.unpack =$ parseCommands =$ EL.mapAccum think init =$ EL.mapM (\resp -> printResponse resp >> return resp) =$ EL.takeWhile (not . checkTerminate)))
 
-checkTerminate = undefined
+checkTerminate Nothing = True
+checkTerminate (Just _) = False
 
 parseCommands = E.sequence $ do
   l <- EL.head_
@@ -322,6 +326,7 @@ parseCommands = E.sequence $ do
       return (num, Right card)
     _ -> fail ("Invalid input:" ++ show l)
 
-think = undefined
+think s _ = (s, Just (0, Left I))
 
-printResponse = undefined
+printResponse (Just (n, c)) = pMove n c
+printResponse Nothing = return ()
