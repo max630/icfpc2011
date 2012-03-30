@@ -308,7 +308,23 @@ main0 =
     commands <- newIORef (setup ++ calls)
     interaction $ (\_ -> dumpF commands pos)
 
-main1 = run (ET.enumHandle stdin $$ (EL.map T.unpack =$ parseCommands =$ EL.mapAccum think init =$ EL.mapM (\resp -> printResponse resp >> return resp) =$ EL.takeWhile (not . checkTerminate)))
+data Command ce = Step ce | Init deriving (Show, Eq)
+
+main = do
+  posI <- randomRIO (0, 255)
+  args <- getArgs
+  let
+    pos = fromInteger posI
+    setup = zip (repeat pos) (generator $ stack $ transform (killallA3 pos))
+    calls = callCmds pos
+  run (ET.enumHandle stdin $$
+        (EL.map T.unpack =$
+         parseCommands =$
+         EL.map Step =$
+         (EL.replicate (case args of {["0"] -> 1; ["1"] -> 0; _ -> error ("Invalid arguments: " ++ show args)}) Init $$
+           (EL.mapAccum dumpCommands (setup ++ calls) =$
+            EL.mapM (\resp -> printResponse resp >> return resp) =$
+            EL.takeWhile (not . checkTerminate)))))
 
 checkTerminate Nothing = True
 checkTerminate (Just _) = False
@@ -326,7 +342,8 @@ parseCommands = E.sequence $ do
       return (num, Right card)
     _ -> fail ("Invalid input:" ++ show l)
 
-think s _ = (s, Just (0, Left I))
+dumpCommands (c:cs) _ = (cs, Just c)
+dumpCommands [] _ = ([], Just (0, Left I))
 
-printResponse (Just (n, c)) = pMove n c
+printResponse (Just (n, c)) = pMove n c >> hFlush stdout
 printResponse Nothing = return ()
