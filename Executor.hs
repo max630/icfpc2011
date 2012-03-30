@@ -1,5 +1,5 @@
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
-{-# LANGUAGE PatternGuards, ViewPatterns, GADTs, EmptyDataDecls #-}
+{-# LANGUAGE PatternGuards, ViewPatterns, GADTs, EmptyDataDecls, NoMonomorphismRestriction, ScopedTypeVariables #-}
 module Main where
 
 import Prelude hiding (succ)
@@ -13,8 +13,20 @@ import Control.Concurrent (threadDelay)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import System.IO.Unsafe (unsafePerformIO)
 
+import System.IO (stdin)
+import Data.Enumerator (run, ($$), (=$), peek)
+import qualified Data.Enumerator as E
+import qualified Data.Enumerator.List as EL
+import qualified Data.Enumerator.Text as ET
+import qualified Data.Text as T
+
+import qualified Data.Map as M
+
 data Card = I | F_zero | F_succ | F_dbl | F_get | F_put | S | K | F_inc | F_dec | F_attack | F_help | F_copy | F_revive | F_zombie
   deriving (Eq, Ord, Show)
+
+instance Read Card where
+  readsPrec = readsPrecC
 
 pprC I = "I"
 pprC F_zero = "zero"
@@ -32,21 +44,29 @@ pprC F_copy = "copy"
 pprC F_revive = "revive"
 pprC F_zombie = "zombie"
 
-readC "I" = I
-readC "zero" = F_zero
-readC "succ" = F_succ
-readC "dbl" = F_dbl
-readC "get" = F_get
-readC "put" = F_put
-readC "S" = S
-readC "K" = K
-readC "inc" = F_inc
-readC "dec" = F_dec
-readC "attack" = F_attack
-readC "help" = F_help
-readC "copy" = F_copy
-readC "revive" = F_revive
-readC "zombie" = F_zombie
+readsPrecC _ s = f $ lex s
+  where
+    f [(v, rest)] | Just res <- M.lookup v m = [(res, rest)]
+    f _ = []
+    m = M.fromList [
+            ("I", I)
+          , ("zero", F_zero)
+          , ("succ", F_succ)
+          , ("dbl", F_dbl)
+          , ("get", F_get)
+          , ("put", F_put)
+          , ("S", S)
+          , ("K", K)
+          , ("inc", F_inc)
+          , ("dec", F_dec)
+          , ("attack", F_attack)
+          , ("help", F_help)
+          , ("copy", F_copy)
+          , ("revive", F_revive)
+          , ("zombie", F_zombie)
+          ]
+
+readC s | [(c, "")] <- readsPrecC 1 s = c
 readC s = error ("Bad card: " ++ s)
 
 arity I = 1
@@ -275,7 +295,7 @@ callOnce pos arg = zip (repeat arg) (generator (stack (transform (callOnceCmd po
 
 callOnceCmd pos arg = call [Card F_get, Value pos, Value arg]
 
-main =
+main0 =
   do
     posI <- randomRIO (0, 255)
     let
@@ -283,5 +303,25 @@ main =
       setup = zip (repeat pos) (generator $ stack $ transform (killallA3 pos))
       calls = callCmds pos
     commands <- newIORef (setup ++ calls)
-    interaction $ (\ _ -> dumpF commands pos)
+    interaction $ (\_ -> dumpF commands pos)
 
+main1 = run (ET.enumHandle stdin $$ (EL.map T.unpack =$ parseCommands =$ EL.mapAccum think init =$ EL.mapM (\resp -> printResponse stdout resp >> return resp) =$ EL.takeWhile checkTerminate))
+
+checkTerminate = undefined
+
+parseCommands = E.sequence $ do
+  l <- EL.head_
+  case l of
+    "1" -> do
+      (reads -> [(num::Int, "")]) <- EL.head_
+      (readsPrecC 1 -> [(card, "")]) <- EL.head_
+      return (num, Left card)
+    "2" -> do
+      (readsPrecC 1 -> [(card, "")]) <- EL.head_
+      (reads -> [(num::Int, "")]) <- EL.head_
+      return (num, Right card)
+    _ -> fail ("Invalid input:" ++ show l)
+
+think = undefined
+
+printResponse = undefined
