@@ -318,7 +318,7 @@ main = do
     calls = callCmds pos
   run (ET.enumHandle stdin $$
         (EL.map T.unpack =$
-         EL.mapM (\v -> hPutStrLn stderr ("c:" ++ show v) >> return v) =$
+         -- EL.mapM (\v -> hPutStrLn stderr ("c:" ++ show v) >> return v) =$
          parseCommands =$
          EL.map Step =$
          (EL.replicate (case args of {["0"] -> 1; ["1"] -> 0; _ -> error ("Invalid arguments: " ++ show args)}) Init $$
