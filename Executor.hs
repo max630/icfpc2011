@@ -3,11 +3,11 @@
 module Main where
 
 import Prelude hiding (succ)
-import Word (Word16)
-import System (getArgs)
+import Data.Word (Word16)
+import System.Environment (getArgs)
 import System.IO (hFlush)
-import List (intersperse)
-import Random (randomRIO)
+import Data.List (intersperse)
+import System.Random (randomRIO)
 import Control.Concurrent (threadDelay)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import System.IO.Unsafe (unsafePerformIO)
