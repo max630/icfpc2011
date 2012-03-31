@@ -6,14 +6,13 @@ import Prelude hiding (succ)
 import Word (Word16)
 import System (getArgs)
 import System.IO (hFlush)
-import IO (stdout)
 import List (intersperse)
 import Random (randomRIO)
 import Control.Concurrent (threadDelay)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import System.IO.Unsafe (unsafePerformIO)
 
-import System.IO (stdin)
+import System.IO (stdin, stderr, stdout, hPutStrLn)
 import Data.Enumerator (run, ($$), (=$), peek)
 import qualified Data.Enumerator as E
 import qualified Data.Enumerator.List as EL
@@ -319,10 +318,12 @@ main = do
     calls = callCmds pos
   run (ET.enumHandle stdin $$
         (EL.map T.unpack =$
+         EL.mapM (\v -> hPutStrLn stderr ("c:" ++ show v) >> return v) =$
          parseCommands =$
          EL.map Step =$
          (EL.replicate (case args of {["0"] -> 1; ["1"] -> 0; _ -> error ("Invalid arguments: " ++ show args)}) Init $$
-           (EL.mapAccum dumpCommands (setup ++ calls) =$
+           (
+            EL.mapAccum dumpCommands (setup ++ calls) =$
             EL.mapM (\resp -> printResponse resp >> return resp) =$
             EL.takeWhile (not . checkTerminate)))))
 
