@@ -337,14 +337,14 @@ parseCommands = E.sequence $ do
       l1 <- EL.head_
       l2 <- EL.head_
       case () of
-        _ | [(num::Int, "")] <- reads l1, [(card, "")] <- readsPrecC 1 l2 -> return (num, Left card)
-        _ -> fail ("Invalid input: " ++ show (l1, l2))
+        _ | [(num::Int, "")] <- reads l2, [(card, "")] <- readsPrecC 1 l1 -> return (num, Left card)
+        _ -> fail ("Invalid input: " ++ show (l, l1, l2))
     "2" -> do
       l1 <- EL.head_
       l2 <- EL.head_
       case () of
-        _ | [(num::Int, "")] <- reads l2, [(card, "")] <- readsPrecC 1 l1 -> return (num, Right card)
-        _ -> fail ("Invalid input: " ++ show (l1, l2))
+        _ | [(num::Int, "")] <- reads l1, [(card, "")] <- readsPrecC 1 l2 -> return (num, Right card)
+        _ -> fail ("Invalid input: " ++ show (l, l1, l2))
     _ -> fail ("Invalid input:" ++ show l)
 
 dumpCommands (c:cs) _ = (cs, Just c)
