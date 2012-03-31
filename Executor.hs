@@ -252,60 +252,11 @@ pMove slot cmd =
               print slot
               putStrLn $ pprC c
 
--- TODO: correct output types
-oMove =
-  do
-    mode <- getLine
-    if mode == "1"
-      then do
-        card <- getLine
-        slotS <- getLine
-        return (read slotS, Left $ readC card)
-      else do
-        slotS <- getLine
-        card <- getLine
-        return (read slotS :: Int, Right $ readC card)
-
-interaction f =
-  do
-    [a0] <- getArgs
-    if a0 == "1"
-      then oMove >>= \ d -> loop (Just d)
-      else loop Nothing
-  where
-    loop o =
-      do
-        (slot, cmd) <- f o
-        pMove slot cmd
-        hFlush stdout
-        newO <- oMove
-        loop (Just newO)
-
-dumpF commands pos =
-  do
-    cmds <- readIORef commands
-    case cmds of
-      (cmd : rest) ->
-        do
-          writeIORef commands rest
-          return cmd
-      _ -> return (0, Left I)
-
 callCmds pos = concat (map (callOnce pos) [(pos + 1), (pos + 49) .. 255] ++ map (callOnce pos) [0, 49 .. pos])
 
 callOnce pos arg = zip (repeat arg) (generator (stack (transform (callOnceCmd pos arg))))
 
 callOnceCmd pos arg = call [Card F_get, Value pos, Value arg]
-
-main0 =
-  do
-    posI <- randomRIO (0, 255)
-    let
-      pos = fromInteger posI
-      setup = zip (repeat pos) (generator $ stack $ transform (killallA3 pos))
-      calls = callCmds pos
-    commands <- newIORef (setup ++ calls)
-    interaction $ (\_ -> dumpF commands pos)
 
 data Command ce = Step ce | Init deriving (Show, Eq)
 
