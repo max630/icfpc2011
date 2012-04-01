@@ -22,7 +22,7 @@ import qualified Data.Text as T
 import qualified Data.Map as M
 
 import Control.Monad.Trans (lift)
-import Data.Maybe (maybe)
+import Data.Maybe (isJust)
 
 data Card = I | F_zero | F_succ | F_dbl | F_get | F_put | S | K | F_inc | F_dec | F_attack | F_help | F_copy | F_revive | F_zombie
   deriving (Eq, Ord, Show)
@@ -276,10 +276,7 @@ main = do
            (
             EL.mapAccum dumpCommands (setup ++ calls) =$
             EL.mapM (\resp -> printResponse resp >> return resp) =$
-            EL.takeWhile (not . checkTerminate)))))
-
-checkTerminate Nothing = True
-checkTerminate (Just _) = False
+            EL.takeWhile isJust))))
 
 parseCommands = E.sequence $ do
   l <- EL.head_
